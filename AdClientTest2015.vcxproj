@@ -52,7 +52,7 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;BOOST_THREAD_PROVIDES_FUTURE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>..\admanager;..\admanager\ad;D:\Program Files\boost_1_59_0;..\protobuf-3.2.0\src;..\cpp-netlib-0.9.4</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
