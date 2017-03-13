@@ -11,6 +11,7 @@ namespace utf = boost::unit_test;
 #include "TcpClient.h"
 #include "md5.hh"
 #include <boost/algorithm/string.hpp>	// boost::to_upper_copy
+#include <sstream>
 
 using namespace boost::asio::ip;
 using boost::asio::io_service;
@@ -26,18 +27,132 @@ BOOST_AUTO_TEST_CASE(tc_init_logger)
 	initLogger();
 }
 
-BOOST_AUTO_TEST_CASE(singleClientTest)
+//BOOST_AUTO_TEST_CASE(singleClientTest)
+//{
+//	LOG_INFO(logger) << "BGN singleClientTest";
+//
+//	AdManager& adManager = AdManager::getInstance();
+//	adManager.setConfig("127.0.0.1", 18888, 123456, false, 0);
+//	adManager.bgnBusiness();
+//
+//	LOG_INFO(logger) << "END singleClientTest";
+//}
+//
+// 测试
+
+BOOST_AUTO_TEST_CASE(oneClientTest)
 {
-	LOG_INFO(logger) << "BGN singleClientTest";
+	std::cout << "输入循环次数: " << std::endl;
+	std::cin >> count;
 
-	AdManager& adManager = AdManager::getInstance();
-	adManager.setConfig("127.0.0.1", 18888, 123456, false, 0);
-	adManager.bgnBusiness();
+	LOG_INFO(logger) << "BGN oneClientTest";
 
-	LOG_INFO(logger) << "END singleClientTest";
+	io_service ios;
+	shared_ptr<io_service::work> work(new io_service::work(ios));
+	auto t1 = thread([&ios]() {ios.run(); });
+
+	auto client = std::make_shared<TcpClient>(ios);
+	client->setAutoReconnect(false);
+	client->syncConnect(locolhost);
+	client->session()->_requestHandler = [](Message msg)
+	{
+		LOG_ERROR(logger) << "收到错误回应：" << msg.id();
+	};
+	int sum = 0;
+
+	// getAdPlayPolicy
+	int id = htonl(123456);
+	char bufId[4] = {};
+	memcpy(bufId, &id, 4);
+	Message msgReq;
+	msgReq.set_content(bufId, 4);
+	msgReq.set_method("getAdPlayPolicy");
+	AdPlayPolicy policy;
+	std::vector<boost::future<Message>> setFutures;
+	for (int i = 0; i < count; i++)
+		setFutures.push_back(client->session()->request(msgReq));
+
+	boost::chrono::seconds span(5 * 60);
+	for (auto& fut : setFutures)
+		if (fut.wait_for(span) == boost::future_status::ready)
+		{
+			Message msgRsp = fut.get();
+			if (msgRsp.returncode() == 0 && policy.ParseFromString(msgRsp.content()) == true)
+				sum++;
+			else
+			{
+				utf8ToGB2312(msgRsp);
+				LOG_ERROR(logger) << "getAdPlayPolicy失败:" << msgRsp.returnmsg() << msgRsp.returncode();
+			}
+		}
+	LOG_INFO(logger) << sum << "次成功收到AdPlayPolicy";
+
+	// getAdList
+	Result ads;
+	sum = 0;
+	setFutures.clear();
+	msgReq.set_method("getAdList");
+	for (int i = 0; i < count; i++)
+		setFutures.push_back(client->session()->request(msgReq));
+	for (auto& fut : setFutures)
+		if (fut.wait_for(span) == boost::future_status::ready)
+		{
+			Message msgRsp = fut.get();
+			if (msgRsp.returncode() == 0 && ads.ParseFromString(msgRsp.content()) == true) // ???policy.ParseFromString也对
+				sum++;
+			else
+			{
+				utf8ToGB2312(msgRsp);
+				LOG_ERROR(logger) << "getAdList失败:" << msgRsp.returnmsg() << msgRsp.returncode();
+			}
+		}
+	std::unordered_map<uint32_t, Ad> _mapAd;
+	for (int i = 0; i < ads.ads_size(); i++)
+	{
+		auto ad = *ads.mutable_ads(i);
+		utf8ToGB2312(ad);
+		_mapAd.insert(std::make_pair(ad.id(), ad));
+	}
+	LOG_INFO(logger) << sum << "次成功收到AdList";
+
+	// getAdFile
+	sum = 0;
+	setFutures.clear();
+	int adID = 0;
+	for (auto pair : _mapAd)
+		if (pair.second.download_size() != 0)	// 需要下载
+		{
+			adID = pair.first;
+			break;
+		}
+
+	msgReq.set_content(&adID, 4);
+	msgReq.set_method("getAdFile");
+	for (int i = 0; i < count; i++)
+		setFutures.push_back(client->session()->request(msgReq));
+	for (auto& fut : setFutures)
+		if (fut.wait_for(span) == boost::future_status::ready)
+		{
+			Message msgRsp = fut.get();
+			if (msgRsp.returncode() == 0)
+			{
+				if (_mapAd[adID].size() == msgRsp.content().length())
+					sum++;
+			}
+			else
+			{
+				utf8ToGB2312(msgRsp);
+				LOG_ERROR(logger) << "getAdFile失败:" << msgRsp.returnmsg() << msgRsp.returncode();
+			}
+		}
+	LOG_INFO(logger) << sum << "次成功收到" << _mapAd[adID].filename() << "文件大小：" << _mapAd[adID].size() << " bytes";
+
+	client->stop();
+	work.reset();
+	t1.join();
+	LOG_INFO(logger) << "END oneClientTest" << "\n";
 }
 
-// 测试
 BOOST_AUTO_TEST_CASE(multiClientTest)
 {
 	std::cout << "输入客户机数: " << std::endl;
@@ -83,9 +198,10 @@ BOOST_AUTO_TEST_CASE(multiClientTest)
 	for (auto& fut : setFutures)
 		if (fut.wait_for(span) == boost::future_status::ready)
 		{
-			sum++;
 			Message msgRsp = fut.get();
-			if (msgRsp.returncode() != 0 || policy.ParseFromString(msgRsp.content()) == false)
+			if (msgRsp.returncode() == 0 && policy.ParseFromString(msgRsp.content()) == true)
+				sum++;
+			else
 			{
 				utf8ToGB2312(msgRsp);
 				LOG_ERROR(logger) << "getAdPlayPolicy失败:" << msgRsp.returnmsg() << msgRsp.returncode();
@@ -103,9 +219,10 @@ BOOST_AUTO_TEST_CASE(multiClientTest)
 	for (auto& fut : setFutures)
 		if (fut.wait_for(span) == boost::future_status::ready)
 		{
-			sum++;
 			Message msgRsp = fut.get();
-			if (msgRsp.returncode() != 0 || ads.ParseFromString(msgRsp.content()) == false) // ???policy.ParseFromString也对
+			if (msgRsp.returncode() == 0 && ads.ParseFromString(msgRsp.content()) == true) // ???policy.ParseFromString也对
+				sum++;
+			else
 			{
 				utf8ToGB2312(msgRsp);
 				LOG_ERROR(logger) << "getAdList失败:" << msgRsp.returnmsg() << msgRsp.returncode();
@@ -139,15 +256,15 @@ BOOST_AUTO_TEST_CASE(multiClientTest)
 		if (fut.wait_for(span) == boost::future_status::ready)
 		{
 			Message msgRsp = fut.get();
-			if (msgRsp.returncode() != 0)
-			{
-				utf8ToGB2312(msgRsp);
-				LOG_ERROR(logger) << "getAdFile失败:" << msgRsp.returnmsg() << msgRsp.returncode();
-			}
-			else
+			if (msgRsp.returncode() == 0)
 			{
 				if (_mapAd[adID].size() == msgRsp.content().length())
 					sum++;
+			}
+			else
+			{
+				utf8ToGB2312(msgRsp);
+				LOG_ERROR(logger) << "getAdFile失败:" << msgRsp.returnmsg() << msgRsp.returncode();
 			}
 		}
 	LOG_INFO(logger) << sum << "个客户端成功收到" << _mapAd[adID].filename() << "文件大小：" << _mapAd[adID].size() << " bytes";
