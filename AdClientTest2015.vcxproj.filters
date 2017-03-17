@@ -32,5 +32,11 @@
     <ClCompile Include="AdClientTest.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="testConnect.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="testConcurrent.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

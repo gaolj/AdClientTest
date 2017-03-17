@@ -10,9 +10,11 @@
 #include <stdio.h>
 #include <tchar.h>
 
+#include <boost/asio/ip/tcp.hpp>		// tcp::socket, tcp::acceptor
+using namespace boost::asio::ip;
 
 
-// TODO: 在此处引用程序需要的其他头文件
+const bool enable_connect = true;
 const bool enable_oneClientOneThread = true;
 const bool enable_oneClientMultiThread = true;
 const bool enable_multiClientOneThread = true;
